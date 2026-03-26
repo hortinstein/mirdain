@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use std::collections::{HashMap, VecDeque};
 use tokio::sync::broadcast;
 
+use crate::metrics::{self, Timer};
 use crate::models::{
     FlowNode, Pipeline, PipelineStatus, ProcessRequest, ProcessResponse, WsEvent,
 };
@@ -153,9 +154,14 @@ async fn call_node(
         config: config.clone(),
     };
 
+    // Measure bytes in
+    let req_bytes = serde_json::to_string(&req).map(|s| s.len()).unwrap_or(0);
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()?;
+
+    let timer = Timer::start();
 
     let resp = client
         .post(&url)
@@ -167,6 +173,8 @@ async fn call_node(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
+        metrics::record(&state.metrics, &node.id, req_bytes, 0, timer.elapsed_ms(), true);
+        emit(&state.ws_tx, WsEvent::metrics_update(&node.id, &state.metrics.get(&node.id).map(|m| m.clone()).unwrap_or_default()));
         return Err(anyhow!("Container returned {status}: {body}"));
     }
 
@@ -174,6 +182,18 @@ async fn call_node(
         .json()
         .await
         .map_err(|e| anyhow!("Invalid response from container: {e}"))?;
+
+    // Record metrics
+    let resp_bytes = serde_json::to_string(&result.outputs).map(|s| s.len()).unwrap_or(0);
+    let latency = timer.elapsed_ms();
+    metrics::record(&state.metrics, &node.id, req_bytes, resp_bytes, latency, false);
+    emit(
+        &state.ws_tx,
+        WsEvent::metrics_update(
+            &node.id,
+            &state.metrics.get(&node.id).map(|m| m.clone()).unwrap_or_default(),
+        ),
+    );
 
     Ok(result.outputs)
 }

@@ -72,6 +72,24 @@ pub struct NodeType {
     pub output_ports: Vec<Port>,
     #[serde(default)]
     pub default_config: HashMap<String, serde_json::Value>,
+    /// Prompt used to AI-generate this node (None for built-ins)
+    #[serde(default)]
+    pub ai_prompt: Option<String>,
+    /// Generated Rust source (None for built-ins)
+    #[serde(default)]
+    pub source_code: Option<String>,
+    /// Build state for AI-generated nodes
+    #[serde(default)]
+    pub build_status: BuildStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum BuildStatus {
+    #[default]
+    Ready,
+    Building,
+    Error,
 }
 
 // ── Container protocol ───────────────────────────────────────────────────────
@@ -153,6 +171,54 @@ impl WsEvent {
                 "nodeId": node_id,
                 "data": data,
             }),
+        }
+    }
+
+    pub fn metrics_update(node_id: &str, metrics: &crate::metrics::NodeMetrics) -> Self {
+        Self {
+            event_type: "metrics_update".into(),
+            payload: serde_json::json!({
+                "nodeId": node_id,
+                "metrics": metrics,
+            }),
+        }
+    }
+
+    pub fn build_log(node_type_id: &str, message: &str) -> Self {
+        Self {
+            event_type: "build_log".into(),
+            payload: serde_json::json!({
+                "nodeTypeId": node_type_id,
+                "message": message,
+            }),
+        }
+    }
+
+    pub fn build_complete(node_type_id: &str, image: &str) -> Self {
+        Self {
+            event_type: "build_complete".into(),
+            payload: serde_json::json!({
+                "nodeTypeId": node_type_id,
+                "image": image,
+                "status": "ready",
+            }),
+        }
+    }
+
+    pub fn build_error(node_type_id: &str, message: &str) -> Self {
+        Self {
+            event_type: "build_error".into(),
+            payload: serde_json::json!({
+                "nodeTypeId": node_type_id,
+                "message": message,
+            }),
+        }
+    }
+
+    pub fn node_types_updated() -> Self {
+        Self {
+            event_type: "node_types_updated".into(),
+            payload: serde_json::json!({}),
         }
     }
 }

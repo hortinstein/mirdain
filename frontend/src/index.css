@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  .input-base {
+    @apply w-full bg-canvas border border-border rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-accent;
+  }
+}
+
 :root {
   color-scheme: dark;
 }

@@ -21,11 +21,13 @@ import { ConfigPanel } from './ConfigPanel'
 import { NodeLibrary } from './NodeLibrary'
 import { Toolbar } from './Toolbar'
 import { LogPanel } from './LogPanel'
+import { MetricsPanel } from './MetricsPanel'
 import { useStore } from '../store'
 import { api } from '../api/client'
 import type { FlowNode, FlowEdge, NodeType, Pipeline } from '../types'
+import { useQuery } from '@tanstack/react-query'
 
-const nodeTypes: NodeTypes = { container: ContainerNode }
+const rfNodeTypes: NodeTypes = { container: ContainerNode }
 
 interface FlowEditorProps {
   pipeline: Pipeline
@@ -33,12 +35,7 @@ interface FlowEditorProps {
 }
 
 function toRfNode(n: FlowNode): Node {
-  return {
-    id: n.id,
-    type: 'container',
-    position: n.position,
-    data: n,
-  }
+  return { id: n.id, type: 'container', position: n.position, data: n }
 }
 
 function toRfEdge(e: FlowEdge): Edge {
@@ -54,21 +51,25 @@ function toRfEdge(e: FlowEdge): Edge {
   }
 }
 
+type BottomTab = 'logs' | 'metrics'
+
 export function FlowEditor({ pipeline, onUpdate }: FlowEditorProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const [rfInstance, setRfInstance] = useState<any>(null)
+  const [bottomTab, setBottomTab] = useState<BottomTab>('logs')
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(
-    pipeline.nodes.map(toRfNode)
-  )
-  const [edges, setEdges, onEdgesChange] = useEdgesState(
-    pipeline.edges.map(toRfEdge)
-  )
+  const [nodes, setNodes, onNodesChange] = useNodesState(pipeline.nodes.map(toRfNode))
+  const [edges, setEdges, onEdgesChange] = useEdgesState(pipeline.edges.map(toRfEdge))
 
   const selectedNodeId = useStore((s) => s.selectedNodeId)
   const setSelectedNodeId = useStore((s) => s.setSelectedNodeId)
-
   const selectedNode = nodes.find((n) => n.id === selectedNodeId)?.data as FlowNode | undefined
+
+  // Fetch node types for ConfigPanel lookup
+  const { data: nodeTypes = [] } = useQuery({
+    queryKey: ['node-types'],
+    queryFn: api.listNodeTypes,
+  })
 
   const buildPipeline = useCallback(
     (ns: Node[], es: Edge[]): Pipeline => ({
@@ -113,7 +114,6 @@ export function FlowEditor({ pipeline, onUpdate }: FlowEditorProps) {
       } as Edge
       setEdges((eds) => {
         const updated = addEdge(newEdge, eds)
-        // Auto-save after connection
         save(nodes, updated)
         return updated
       })
@@ -149,7 +149,6 @@ export function FlowEditor({ pipeline, onUpdate }: FlowEditorProps) {
           output_ports: nodeType.output_ports,
         } satisfies FlowNode,
       }
-
       setNodes((nds) => {
         const updated = [...nds, newNode]
         save(updated, edges)
@@ -164,25 +163,16 @@ export function FlowEditor({ pipeline, onUpdate }: FlowEditorProps) {
     event.dataTransfer.dropEffect = 'move'
   }, [])
 
-  const onNodeClick = useCallback(
-    (_: React.MouseEvent, node: Node) => {
-      setSelectedNodeId(node.id)
-    },
-    [setSelectedNodeId]
-  )
-
-  const onPaneClick = useCallback(() => {
-    setSelectedNodeId(null)
+  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    setSelectedNodeId(node.id)
   }, [setSelectedNodeId])
+
+  const onPaneClick = useCallback(() => setSelectedNodeId(null), [setSelectedNodeId])
 
   const handleNodeSave = useCallback(
     (updated: FlowNode) => {
       setNodes((nds) => {
-        const next = nds.map((n) =>
-          n.id === updated.id
-            ? { ...n, data: updated }
-            : n
-        )
+        const next = nds.map((n) => n.id === updated.id ? { ...n, data: updated } : n)
         save(next, edges)
         return next
       })
@@ -190,13 +180,10 @@ export function FlowEditor({ pipeline, onUpdate }: FlowEditorProps) {
     [edges, save, setNodes]
   )
 
-  const handleNodesChange = useCallback(
-    (changes: any) => {
-      onNodesChange(changes)
-      // Save after position changes (debounce would be nice but keep it simple)
-    },
-    [onNodesChange]
-  )
+  // Find the NodeType for the selected node (to pass to ConfigPanel)
+  const selectedNodeType = selectedNode
+    ? nodeTypes.find((nt) => nt.image === selectedNode.image)
+    : undefined
 
   return (
     <div className="flex flex-col h-full">
@@ -207,61 +194,56 @@ export function FlowEditor({ pipeline, onUpdate }: FlowEditorProps) {
         <div className="w-52 flex-shrink-0 border-r border-border bg-panel overflow-hidden">
           <NodeLibrary
             onDragStart={(e, nt) => {
-              e.dataTransfer.setData(
-                'application/mirdain-nodetype',
-                JSON.stringify(nt)
-              )
+              e.dataTransfer.setData('application/mirdain-nodetype', JSON.stringify(nt))
               e.dataTransfer.effectAllowed = 'move'
             }}
           />
         </div>
 
-        {/* Centre: canvas */}
+        {/* Centre: canvas + bottom panel */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <div ref={reactFlowWrapper} className="flex-1">
             <ReactFlow
               nodes={nodes}
               edges={edges}
-              onNodesChange={handleNodesChange}
-              onEdgesChange={(changes) => {
-                onEdgesChange(changes)
-              }}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
               onConnect={onConnect}
               onDrop={onDrop}
               onDragOver={onDragOver}
               onNodeClick={onNodeClick}
               onPaneClick={onPaneClick}
               onInit={setRfInstance}
-              nodeTypes={nodeTypes}
+              nodeTypes={rfNodeTypes}
               fitView
               deleteKeyCode="Delete"
               className="bg-canvas"
-              defaultEdgeOptions={{
-                animated: true,
-                style: { stroke: '#6366f1', strokeWidth: 2 },
-              }}
             >
-              <Background
-                variant={BackgroundVariant.Dots}
-                gap={20}
-                size={1}
-                color="#2a2d3a"
-              />
+              <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#2a2d3a" />
               <Controls className="!bg-panel !border-border" />
-              <MiniMap
-                className="!bg-panel !border-border"
-                nodeColor="#6366f1"
-                maskColor="rgba(15,17,23,0.8)"
-              />
+              <MiniMap className="!bg-panel !border-border" nodeColor="#6366f1" maskColor="rgba(15,17,23,0.8)" />
               <Panel position="top-left" className="text-xs text-gray-600 ml-2 mt-2">
                 {nodes.length} nodes · {edges.length} edges
               </Panel>
             </ReactFlow>
           </div>
 
-          {/* Bottom: log panel */}
-          <div className="h-36 border-t border-border bg-panel overflow-hidden">
-            <LogPanel pipelineId={pipeline.id} />
+          {/* Bottom tabbed panel */}
+          <div className="h-40 border-t border-border bg-panel flex flex-col overflow-hidden">
+            <div className="flex border-b border-border flex-shrink-0">
+              <BottomTabBtn active={bottomTab === 'logs'} onClick={() => setBottomTab('logs')}>
+                Logs
+              </BottomTabBtn>
+              <BottomTabBtn active={bottomTab === 'metrics'} onClick={() => setBottomTab('metrics')}>
+                Metrics
+              </BottomTabBtn>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              {bottomTab === 'logs' && <LogPanel pipelineId={pipeline.id} />}
+              {bottomTab === 'metrics' && (
+                <MetricsPanel nodes={pipeline.nodes} />
+              )}
+            </div>
           </div>
         </div>
 
@@ -271,6 +253,7 @@ export function FlowEditor({ pipeline, onUpdate }: FlowEditorProps) {
             <ConfigPanel
               node={selectedNode}
               pipelineId={pipeline.id}
+              nodeType={selectedNodeType}
               onClose={() => setSelectedNodeId(null)}
               onSave={handleNodeSave}
             />
@@ -278,5 +261,28 @@ export function FlowEditor({ pipeline, onUpdate }: FlowEditorProps) {
         )}
       </div>
     </div>
+  )
+}
+
+function BottomTabBtn({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`text-xs px-4 py-1.5 transition-colors border-b-2 ${
+        active
+          ? 'text-white border-accent'
+          : 'text-gray-500 hover:text-gray-300 border-transparent'
+      }`}
+    >
+      {children}
+    </button>
   )
 }

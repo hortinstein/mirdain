@@ -1,10 +1,12 @@
+pub mod codegen;
 pub mod execution;
+pub mod metrics;
 pub mod node_types;
 pub mod pipelines;
 pub mod ws;
 
 use axum::{
-    routing::{get, post, put},
+    routing::{get, post},
     Router,
 };
 
@@ -26,6 +28,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/pipelines/:id/trigger", post(execution::trigger))
         // Node type registry
         .route("/api/node-types", get(node_types::list))
+        // AI code generation
+        .route("/api/node-types/generate", post(codegen::generate))
+        .route("/api/node-types/:id/rebuild", post(codegen::rebuild))
+        .route("/api/node-types/:id/source", get(codegen::get_source))
+        // Metrics
+        .route("/api/metrics", get(metrics::all))
         // WebSocket
         .route("/ws", get(ws::handler))
         .with_state(state)

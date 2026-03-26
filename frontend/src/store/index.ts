@@ -1,10 +1,12 @@
 import { create } from 'zustand'
-import type { Pipeline, WsEvent } from '../types'
+import type { NodeMetrics, Pipeline, WsEvent } from '../types'
 
-interface LogEntry {
+export interface LogEntry {
   id: number
   pipelineId: string
+  nodeTypeId?: string
   message: string
+  kind: 'exec' | 'build'
   ts: number
 }
 
@@ -27,15 +29,26 @@ interface MirdainStore {
   selectedNodeId: string | null
   setSelectedNodeId: (id: string | null) => void
 
-  // Real-time statuses from WebSocket
+  // Real-time node statuses from WS
   nodeStatuses: NodeStatusMap
+  // Per-node metrics from WS
+  nodeMetrics: Record<string, NodeMetrics>
+  // Logs (both exec and build)
   logs: LogEntry[]
   logCounter: number
+
+  // Build status per node type id
+  buildStatuses: Record<string, 'building' | 'ready' | 'error'>
+
   handleWsEvent: (event: WsEvent) => void
 
   // Trigger input JSON string (for the trigger modal)
   triggerInput: string
   setTriggerInput: (v: string) => void
+
+  // AI generator modal open state
+  aiModalOpen: boolean
+  setAiModalOpen: (open: boolean) => void
 }
 
 export const useStore = create<MirdainStore>((set) => ({
@@ -57,16 +70,19 @@ export const useStore = create<MirdainStore>((set) => ({
   setSelectedNodeId: (id) => set({ selectedNodeId: id }),
 
   nodeStatuses: {},
+  nodeMetrics: {},
   logs: [],
   logCounter: 0,
+  buildStatuses: {},
 
   handleWsEvent: (event) => {
     set((s) => {
+      const counter = s.logCounter + 1
+
       if (event.type === 'node_status' && event.nodeId && event.status) {
-        return {
-          nodeStatuses: { ...s.nodeStatuses, [event.nodeId]: event.status },
-        }
+        return { nodeStatuses: { ...s.nodeStatuses, [event.nodeId]: event.status } }
       }
+
       if (event.type === 'pipeline_status' && event.pipelineId && event.status) {
         return {
           pipelines: s.pipelines.map((p) =>
@@ -76,22 +92,58 @@ export const useStore = create<MirdainStore>((set) => ({
           ),
         }
       }
+
       if (event.type === 'execution_log' && event.message) {
         const entry: LogEntry = {
-          id: s.logCounter + 1,
+          id: counter,
           pipelineId: event.pipelineId ?? '',
           message: event.message,
+          kind: 'exec',
+          ts: Date.now(),
+        }
+        return { logCounter: counter, logs: [...s.logs.slice(-499), entry] }
+      }
+
+      if (event.type === 'metrics_update' && event.nodeId && event.metrics) {
+        return {
+          nodeMetrics: { ...s.nodeMetrics, [event.nodeId]: event.metrics },
+        }
+      }
+
+      if (event.type === 'build_log' && event.message) {
+        const entry: LogEntry = {
+          id: counter,
+          pipelineId: '',
+          nodeTypeId: event.nodeTypeId,
+          message: event.message,
+          kind: 'build',
           ts: Date.now(),
         }
         return {
-          logCounter: s.logCounter + 1,
-          logs: [...s.logs.slice(-199), entry],
+          logCounter: counter,
+          logs: [...s.logs.slice(-499), entry],
         }
       }
+
+      if (event.type === 'build_complete' && event.nodeTypeId) {
+        return {
+          buildStatuses: { ...s.buildStatuses, [event.nodeTypeId]: 'ready' },
+        }
+      }
+
+      if (event.type === 'build_error' && event.nodeTypeId) {
+        return {
+          buildStatuses: { ...s.buildStatuses, [event.nodeTypeId]: 'error' },
+        }
+      }
+
       return {}
     })
   },
 
   triggerInput: '{"value": "hello world"}',
   setTriggerInput: (v) => set({ triggerInput: v }),
+
+  aiModalOpen: false,
+  setAiModalOpen: (open) => set({ aiModalOpen: open }),
 }))

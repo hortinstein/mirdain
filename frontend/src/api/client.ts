@@ -1,4 +1,4 @@
-import type { Pipeline, NodeType } from '../types'
+import type { Pipeline, NodeType, NodeMetrics } from '../types'
 
 const BASE = '/api'
 
@@ -38,4 +38,28 @@ export const api = {
 
   // Node types
   listNodeTypes: () => req<NodeType[]>('/node-types'),
+
+  // AI generation
+  generateNodeType: (body: {
+    name: string
+    description: string
+    input_ports: { id: string; label: string }[]
+    output_ports: { id: string; label: string }[]
+  }) =>
+    req<{ node_type: NodeType }>('/node-types/generate', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  rebuildNodeType: (id: string, body: { description?: string; source_code?: string }) =>
+    req<{ node_type: NodeType }>(`/node-types/${encodeURIComponent(id)}/rebuild`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getNodeTypeSource: (id: string) =>
+    req<{ source_code: string | null }>(`/node-types/${encodeURIComponent(id)}/source`),
+
+  // Metrics
+  getMetrics: () => req<Record<string, NodeMetrics & { avg_latency_ms: number }>>('/metrics'),
 }

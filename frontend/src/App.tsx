@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, GitBranch, Loader2 } from 'lucide-react'
 
 import { FlowEditor } from './components/FlowEditor'
+import { AiNodeModal } from './components/AiNodeModal'
 import { api } from './api/client'
 import { useStore } from './store'
 import type { Pipeline, WsEvent } from './types'
@@ -18,6 +19,8 @@ export default function App() {
   const activePipelineId = useStore((s) => s.activePipelineId)
   const setActivePipelineId = useStore((s) => s.setActivePipelineId)
   const handleWsEvent = useStore((s) => s.handleWsEvent)
+  const aiModalOpen = useStore((s) => s.aiModalOpen)
+  const setAiModalOpen = useStore((s) => s.setAiModalOpen)
 
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
@@ -35,9 +38,11 @@ export default function App() {
       try {
         const event: WsEvent = JSON.parse(msg.data)
         handleWsEvent(event)
-        // Refresh pipeline list on status changes
         if (event.type === 'pipeline_status') {
           queryClient.invalidateQueries({ queryKey: ['pipelines'] })
+        }
+        if (event.type === 'node_types_updated') {
+          queryClient.invalidateQueries({ queryKey: ['node-types'] })
         }
       } catch {}
     }
@@ -73,6 +78,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-canvas text-white overflow-hidden">
+      {aiModalOpen && <AiNodeModal onClose={() => setAiModalOpen(false)} />}
       {/* Sidebar */}
       <div className="w-56 flex-shrink-0 border-r border-border bg-panel flex flex-col">
         {/* Logo */}
